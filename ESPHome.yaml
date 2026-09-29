@@ -1,0 +1,293 @@
+esphome:
+  name: ble-gw-kuhnia
+  friendly_name: ble-gw-kuhnia
+  build_flags:
+    - "-DARDUINO_USB_MODE=1"
+    - "-DARDUINO_USB_CDC_ON_BOOT=1"
+  on_boot:
+    priority: 600
+    then:
+      - lambda: |-
+          Serial.begin(115200);
+
+esp32:
+  variant: esp32c3
+  flash_size: 4MB
+  framework:
+    type: arduino
+
+logger:
+  level: DEBUG
+  baud_rate: 0 
+
+globals:
+  - id: was_held
+    type: bool
+    initial_value: 'false'
+  - id: was_light_on
+    type: bool
+    initial_value: 'false'
+
+api:
+  encryption:
+    key: "aHx8jw2Iq5aMUsi3+90aVINJ5bD6DwDfNM5FaG6Jy9s="
+
+# ==========================================
+# ИНТЕГРАЦИЯ КАСТОМНОГО МЕДИАПЛЕЕРА
+# ==========================================
+external_components:
+  - source: github://albertgermania888-dev/Openlumi-ESP32
+    components: [ gateway_player ]
+
+media_player:
+  - platform: gateway_player
+    name: "Gateway Audio"
+    id: gw_audio
+
+ota:
+  - platform: esphome
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  fast_connect: true
+  power_save_mode: none
+
+# ==========================================
+# ПОЛЗУНКИ И ВЫКЛЮЧАТЕЛИ (Раздел: Настройки)
+# ==========================================
+number:
+  - platform: template
+    name: "Transition (Вкл/Выкл)"
+    id: gw_transition_power
+    min_value: 0
+    max_value: 60
+    step: 0.1
+    initial_value: 1.0
+    optimistic: true
+    unit_of_measurement: "s"
+    mode: slider
+    entity_category: config
+
+  - platform: template
+    name: "Transition (Цвет)"
+    id: gw_transition_color
+    min_value: 0
+    max_value: 60
+    step: 0.1
+    initial_value: 0.5
+    optimistic: true
+    unit_of_measurement: "s"
+    mode: slider
+    entity_category: config
+
+switch:
+  - platform: template
+    name: "Gateway Wi-Fi"
+    id: gw_sys_wifi_switch
+    icon: "mdi:wifi"
+    entity_category: config
+    optimistic: true
+    turn_on_action:
+      - lambda: |-
+          Serial.printf("CMD:SYS:WIFI:ON\n");
+    turn_off_action:
+      - lambda: |-
+          Serial.printf("CMD:SYS:WIFI:OFF\n");
+
+# ==========================================
+# BLUETOOTH PROXY 
+# ==========================================
+esp32_ble_tracker:
+  scan_parameters:
+    interval: 320ms
+    window: 240ms
+    active: true
+
+bluetooth_proxy:
+  active: true
+
+# ==========================================
+# ПАРСИНГ USB 
+# ==========================================
+interval:
+  - interval: 50ms
+    then:
+      - lambda: |-
+          while (Serial.available()) {
+            String line = Serial.readStringUntil('\n');
+            line.trim();
+            if (line.startsWith("ACTION:")) {
+              id(gw_btn_action).publish_state(line.substring(7).c_str());
+            } else if (line.startsWith("LDR:")) {
+              id(gw_ldr).publish_state(line.substring(4).toFloat());
+            } else if (line.startsWith("SYS:TEMP:")) {
+              id(gw_sys_temp).publish_state(line.substring(9).toFloat());
+            } else if (line.startsWith("SYS:CPU:")) {
+              id(gw_sys_cpu).publish_state(line.substring(8).toFloat());
+            } else if (line.startsWith("SYS:UPTIME:")) {
+              id(gw_sys_uptime).publish_state(line.substring(11).toFloat());
+            } else if (line.startsWith("SYS:WIFI:")) {
+              if (line.substring(9) == "ON") {
+                id(gw_sys_wifi_switch).publish_state(true);
+              } else {
+                id(gw_sys_wifi_switch).publish_state(false);
+              }
+            } else if (line.startsWith("SYS:RAM:")) {
+              int colon = line.indexOf(':', 8);
+              if (colon != -1) {
+                id(gw_sys_ram_used).publish_state(line.substring(8, colon).toFloat());
+                id(gw_sys_ram_free).publish_state(line.substring(colon + 1).toFloat());
+              }
+            } else if (line.startsWith("SYS:ROM:")) {
+              int colon = line.indexOf(':', 8);
+              if (colon != -1) {
+                id(gw_sys_rom_used).publish_state(line.substring(8, colon).toFloat());
+                id(gw_sys_rom_free).publish_state(line.substring(colon + 1).toFloat());
+              }
+            }
+          }
+
+# ==========================================
+# ЧИСЛОВЫЕ СЕНСОРЫ И АНАЛИТИКА ШЛЮЗА
+# ==========================================
+sensor:
+  - platform: template
+    id: gw_ldr
+    name: "Gateway Illuminance"
+    device_class: illuminance
+    unit_of_measurement: "lx"
+
+  - platform: template
+    id: gw_sys_temp
+    name: "Gateway CPU Temperature"
+    unit_of_measurement: "°C"
+    device_class: temperature
+    entity_category: diagnostic
+
+  - platform: template
+    id: gw_sys_cpu
+    name: "Gateway CPU Load (1m)"
+    unit_of_measurement: "%"
+    icon: "mdi:cpu-64-bit"
+    entity_category: diagnostic
+
+  - platform: template
+    id: gw_sys_ram_used
+    name: "Gateway RAM Used"
+    unit_of_measurement: "MB"
+    icon: "mdi:memory"
+    entity_category: diagnostic
+
+  - platform: template
+    id: gw_sys_ram_free
+    name: "Gateway RAM Free"
+    unit_of_measurement: "MB"
+    icon: "mdi:memory"
+    entity_category: diagnostic
+
+  - platform: template
+    id: gw_sys_rom_used
+    name: "Gateway Flash Used"
+    unit_of_measurement: "MB"
+    icon: "mdi:harddisk"
+    entity_category: diagnostic
+
+  - platform: template
+    id: gw_sys_rom_free
+    name: "Gateway Flash Free"
+    unit_of_measurement: "MB"
+    icon: "mdi:harddisk"
+    entity_category: diagnostic
+
+  - platform: template
+    id: gw_sys_uptime
+    name: "Gateway Uptime"
+    unit_of_measurement: "h"
+    icon: "mdi:clock-outline"
+    entity_category: diagnostic
+
+# ==========================================
+# ТЕКСТОВЫЕ СЕНСОРЫ
+# ==========================================
+text_sensor:
+  - platform: template
+    id: gw_btn_action
+    name: "Gateway Button Action"
+    icon: "mdi:gesture-double-tap"
+
+# ==========================================
+# ЛАМПА (Единый пакет)
+# ==========================================
+output:
+  - platform: template
+    id: gw_red
+    type: float
+    write_action: { lambda: "return;" }
+  - platform: template
+    id: gw_green
+    type: float
+    write_action: { lambda: "return;" }
+  - platform: template
+    id: gw_blue
+    type: float
+    write_action: { lambda: "return;" }
+
+light:
+  - platform: rgb
+    name: "Gateway Light"
+    id: gw_light
+    red: gw_red
+    green: gw_green
+    blue: gw_blue
+    gamma_correct: 1.0 
+    default_transition_length: 0s 
+    
+    effects:
+      - lambda: { name: "Police", update_interval: 1s, lambda: "return;" }
+      - lambda: { name: "Rainbow", update_interval: 1s, lambda: "return;" }
+      - lambda: { name: "Strobe", update_interval: 1s, lambda: "return;" }
+      - lambda: { name: "Blink", update_interval: 1s, lambda: "return;" }
+      - lambda: { name: "Police Strobe", update_interval: 1s, lambda: "return;" }
+      - lambda: { name: "Double Strobe", update_interval: 1s, lambda: "return;" }
+      - lambda: { name: "Breathing", update_interval: 1s, lambda: "return;" }
+      - lambda: { name: "Fire", update_interval: 1s, lambda: "return;" }
+      - lambda: { name: "Police Triple Strobe", update_interval: 1s, lambda: "return;" }
+    
+    on_state:
+      - lambda: |-
+          std::string effect = id(gw_light).get_effect_name();
+          if (effect == "") { effect = "None"; }
+          
+          bool is_on = id(gw_light).current_values.is_on();
+          float trans;
+          if (is_on != id(was_light_on)) {
+            trans = id(gw_transition_power).state;
+          } else {
+            trans = id(gw_transition_color).state;
+          }
+          id(was_light_on) = is_on;
+          
+          if (!is_on) {
+            Serial.printf("CMD:STATE:0,0,0:%.1f:None\n", trans);
+          } else {
+            float r, g, b;
+            id(gw_light).current_values_as_rgb(&r, &g, &b);
+            Serial.printf("CMD:STATE:%d,%d,%d:%.1f:%s\n", (int)(r*255), (int)(g*255), (int)(b*255), trans, effect.c_str());
+          }
+
+# ==========================================
+# ПЕРЕЗАГРУЗКИ (Раздел: Диагностика)
+# ==========================================
+button:
+  - platform: restart
+    name: "Restart ESP32 Gateway"
+    entity_category: diagnostic
+
+  - platform: template
+    name: "Reboot Xiaomi Gateway"
+    icon: "mdi:restart"
+    entity_category: diagnostic
+    on_press:
+      - lambda: |-
+          Serial.printf("CMD:SYS:REBOOT\n");
