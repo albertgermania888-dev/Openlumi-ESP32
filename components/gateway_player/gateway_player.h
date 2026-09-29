@@ -1,5 +1,6 @@
 #pragma once
 #include "esphome.h"
+#include "esphome/components/media_player/media_player.h"
 
 namespace gateway_player {
 
