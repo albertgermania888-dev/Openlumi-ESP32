@@ -8,25 +8,32 @@ DEPENDENCIES = ['media_player']
 gateway_player_ns = cg.esphome_ns.namespace("gateway_player")
 GatewayMediaPlayer = gateway_player_ns.class_("GatewayMediaPlayer", media_player.MediaPlayer, cg.Component)
 
-# Умная функция для получения правильной схемы в любой версии ESPHome
-def get_base_schema():
-    if hasattr(media_player, 'media_player_schema'):
-        try:
-            # Для новых версий (ESPHome 2024.x - 2026.x)
-            return media_player.media_player_schema(GatewayMediaPlayer)
-        except TypeError:
-            return media_player.media_player_schema()
-            
-    if hasattr(media_player, 'MEDIA_PLAYER_SCHEMA'):
-        # Для старых версий
-        return media_player.MEDIA_PLAYER_SCHEMA
-        
-    # Резервный вариант: базовая схема любой сущности Home Assistant
-    return getattr(cv, 'ENTITY_BASE_SCHEMA', cv.Schema({}))
-
-CONFIG_SCHEMA = get_base_schema().extend({
+# 1. Формируем безопасную базовую схему
+schema = cv.Schema({
     cv.GenerateID(): cv.declare_id(GatewayMediaPlayer),
 }).extend(cv.COMPONENT_SCHEMA)
+
+# 2. Динамически подтягиваем схему медиаплеера (работает на всех версиях ESPHome)
+if hasattr(media_player, 'media_player_schema'):
+    try:
+        schema = schema.extend(media_player.media_player_schema(GatewayMediaPlayer))
+    except Exception:
+        try:
+            schema = schema.extend(media_player.media_player_schema())
+        except Exception:
+            pass
+elif hasattr(media_player, 'MEDIA_PLAYER_SCHEMA'):
+    schema = schema.extend(media_player.MEDIA_PLAYER_SCHEMA)
+
+# 3. Принудительно задаем ключи, без которых падает ESPHome >= 2026.x
+def ensure_keys(config):
+    if 'disabled_by_default' not in config:
+        config['disabled_by_default'] = False
+    if 'internal' not in config:
+        config['internal'] = False
+    return config
+
+CONFIG_SCHEMA = cv.All(schema, ensure_keys)
 
 async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
